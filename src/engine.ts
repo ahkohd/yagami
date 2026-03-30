@@ -1080,6 +1080,7 @@ export class YagamiEngine {
       ...options,
       searchEngine: options.searchEngine ?? this.config.searchEngine,
       searchEngineUrlTemplate: options.searchEngineUrlTemplate ?? this.config.searchEngineUrlTemplate,
+      tavilyApiKey: options.tavilyApiKey ?? this.config.tavilyApiKey,
     });
   }
 

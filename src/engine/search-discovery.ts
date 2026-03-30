@@ -13,8 +13,9 @@ import {
 } from "./helpers.js";
 import { normalizeUrl } from "./url-utils.js";
 import type { SearchEnginePreset } from "../types/config.js";
+import { tavily } from "@tavily/core";
 
-const SEARCH_ENGINE_PRESETS: Readonly<Record<Exclude<SearchEnginePreset, "custom">, string>> = {
+const SEARCH_ENGINE_PRESETS: Readonly<Record<Exclude<SearchEnginePreset, "custom" | "tavily">, string>> = {
   duckduckgo: "https://duckduckgo.com/html/?q={query}",
   bing: "https://www.bing.com/search?q={query}",
   google: "https://www.google.com/search?q={query}",
@@ -30,6 +31,7 @@ function normalizeSearchEngine(value: unknown, fallback: SearchEnginePreset = "d
   if (normalized === "bing") return "bing";
   if (normalized === "google") return "google";
   if (normalized === "brave") return "brave";
+  if (normalized === "tavily") return "tavily";
   if (normalized === "custom") return "custom";
 
   return fallback;
@@ -45,6 +47,13 @@ export function resolveSearchEngineTemplate(
     return {
       engine: "custom",
       template: normalizedTemplate,
+    };
+  }
+
+  if (engine === "tavily") {
+    return {
+      engine: "tavily",
+      template: "",
     };
   }
 
@@ -201,6 +210,42 @@ export async function parseDuckDuckGoResults(
   return fallback;
 }
 
+async function tavilySearch(
+  query: string,
+  options: {
+    apiKey: string;
+    maxResults: number;
+    includeDomains?: string[];
+    excludeDomains?: string[];
+  },
+): Promise<Array<Record<string, unknown>>> {
+  const client = tavily({ apiKey: options.apiKey });
+  const response = await client.search(query, {
+    maxResults: Math.min(options.maxResults, 20),
+    searchDepth: "basic",
+    ...(options.includeDomains && options.includeDomains.length > 0
+      ? { includeDomains: options.includeDomains }
+      : {}),
+    ...(options.excludeDomains && options.excludeDomains.length > 0
+      ? { excludeDomains: options.excludeDomains }
+      : {}),
+  });
+
+  return (response.results || []).map(
+    (result: { url?: string; title?: string; content?: string }, index: number) => {
+      const url = String(result.url || "");
+      const hostname = getHostname(url);
+      return {
+        rank: index + 1,
+        url,
+        title: String(result.title || ""),
+        snippet: String(result.content || ""),
+        domain: hostname,
+      };
+    },
+  );
+}
+
 export async function discoverSearchResults(
   query: string,
   options: Record<string, unknown> = {},
@@ -236,6 +281,62 @@ export async function discoverSearchResults(
   const effectiveQuery = queryHint ? `${query} ${queryHint}` : query;
 
   const requestedEngine = normalizeSearchEngine(options.searchEngine, "duckduckgo");
+
+  if (requestedEngine === "tavily") {
+    const tavilyApiKey = String(options.tavilyApiKey || "").trim();
+    if (!tavilyApiKey) {
+      throw new Error("TAVILY_API_KEY is required when searchEngine is set to 'tavily'.");
+    }
+
+    let results = await tavilySearch(effectiveQuery, {
+      apiKey: tavilyApiKey,
+      maxResults: Math.max(numResults * 2, 20),
+      includeDomains: mergedIncludeDomains.length > 0 ? mergedIncludeDomains : undefined,
+      excludeDomains: excludeDomains.length > 0 ? excludeDomains : undefined,
+    });
+
+    if (category === "pdf") {
+      results = results.filter((result) =>
+        String(result.url || "")
+          .toLowerCase()
+          .includes(".pdf"),
+      );
+    }
+
+    if (mergedIncludeText.length > 0) {
+      results = results.filter((result) => {
+        const haystack = `${result.title || ""} ${result.snippet || ""} ${result.url || ""}`.toLowerCase();
+        return mergedIncludeText.every((term) => haystack.includes(term));
+      });
+    }
+
+    if (excludeText.length > 0) {
+      results = results.filter((result) => {
+        const haystack = `${result.title || ""} ${result.snippet || ""} ${result.url || ""}`.toLowerCase();
+        return excludeText.every((term) => !haystack.includes(term));
+      });
+    }
+
+    results = results.slice(0, numResults).map((result, index) => ({ ...result, rank: index + 1 }));
+
+    return {
+      query,
+      effectiveQuery,
+      category: category || null,
+      searchEngine: "tavily",
+      searchEngineRequested: "tavily",
+      searchUrlTemplate: null,
+      searchUrl: null,
+      results,
+      durationMs: Date.now() - startedAt,
+      filters: {
+        includeDomains: mergedIncludeDomains,
+        excludeDomains,
+        includeText: mergedIncludeText,
+        excludeText,
+      },
+    };
+  }
   const requestedSearch = resolveSearchEngineTemplate(requestedEngine, options.searchEngineUrlTemplate);
   const fallbackSearch =
     requestedSearch.engine === "duckduckgo"

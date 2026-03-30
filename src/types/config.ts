@@ -6,7 +6,7 @@ export type ToolExecutionMode = "sequential" | "parallel";
 
 export type LlmApi = "openai-completions" | "anthropic-messages";
 
-export type SearchEnginePreset = "duckduckgo" | "bing" | "google" | "brave" | "custom";
+export type SearchEnginePreset = "duckduckgo" | "bing" | "google" | "brave" | "tavily" | "custom";
 
 export interface RuntimeConfig {
   runtimeDir: string;
@@ -25,6 +25,7 @@ export interface RuntimeConfig {
 
   searchEngine: SearchEnginePreset;
   searchEngineUrlTemplate: string;
+  tavilyApiKey: string;
 
   lightpandaCdpUrl: string;
   lightpandaHost: string;

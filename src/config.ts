@@ -46,6 +46,7 @@ function parseSearchEngine(value: unknown, fallback: SearchEnginePreset = "duckd
   if (normalized === "bing") return "bing";
   if (normalized === "google") return "google";
   if (normalized === "brave") return "brave";
+  if (normalized === "tavily") return "tavily";
   if (normalized === "custom") return "custom";
 
   return fallback;
@@ -179,6 +180,7 @@ export function getConfig(): RuntimeConfig {
   const fileLlmModel = toStringOr(fileValues.llmModel, "");
   const fileSearchEngine = parseSearchEngine(fileValues.searchEngine, "duckduckgo");
   const fileSearchEngineUrlTemplate = toStringOr(fileValues.searchEngineUrlTemplate, "");
+  const fileTavilyApiKey = toStringOr(fileValues.tavilyApiKey, "");
 
   const fileBrowseLinkTimeoutMs = toInt(fileValues.browseLinkTimeoutMs, 7000);
   const fileCacheTtlMs = toInt(fileValues.cacheTtlMs, 10 * 60 * 1000);
@@ -195,6 +197,7 @@ export function getConfig(): RuntimeConfig {
     process.env.YAGAMI_SEARCH_ENGINE_URL_TEMPLATE,
     fileSearchEngineUrlTemplate || "",
   );
+  const tavilyApiKey = toStringOr(process.env.TAVILY_API_KEY, fileTavilyApiKey || "");
 
   const lightpandaCdpUrl = process.env.YAGAMI_CDP_URL || "ws://127.0.0.1:9222";
   const cdpEndpoint = parseCdpEndpoint(lightpandaCdpUrl);
@@ -218,6 +221,7 @@ export function getConfig(): RuntimeConfig {
 
     searchEngine,
     searchEngineUrlTemplate,
+    tavilyApiKey,
 
     lightpandaCdpUrl,
     lightpandaHost: process.env.YAGAMI_LIGHTPANDA_HOST || cdpEndpoint.host,
