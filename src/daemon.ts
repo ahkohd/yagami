@@ -646,6 +646,7 @@ const server = http.createServer(async (req, res) => {
     if (
       reloading &&
       !(req.method === "GET" && req.url === "/health") &&
+      !(req.method === "GET" && req.url === "/metrics") &&
       !(req.method === "POST" && req.url === "/stats") &&
       !(req.method === "POST" && req.url === "/reload") &&
       !(req.method === "POST" && req.url === "/stop")
@@ -668,6 +669,70 @@ const server = http.createServer(async (req, res) => {
         reloading,
         ...(engine.getHealth() as JsonObject),
       });
+    }
+
+    if (req.method === "GET" && req.url === "/metrics") {
+      const h = engine.getHealth() as Record<string, unknown>;
+      const tokens = (h.tokens || {}) as Record<string, unknown>;
+      const tokenCost = (tokens.cost || {}) as Record<string, unknown>;
+      const lines = [
+        "# HELP yagami_queries_total Total number of queries processed",
+        "# TYPE yagami_queries_total counter",
+        `yagami_queries_total ${h.queries || 0}`,
+        "# HELP yagami_queries_active Currently active queries",
+        "# TYPE yagami_queries_active gauge",
+        `yagami_queries_active ${h.activeQueries || 0}`,
+        "# HELP yagami_cache_hits_total Total cache hits",
+        "# TYPE yagami_cache_hits_total counter",
+        `yagami_cache_hits_total ${h.cacheHits || 0}`,
+        "# HELP yagami_cache_misses_total Total cache misses",
+        "# TYPE yagami_cache_misses_total counter",
+        `yagami_cache_misses_total ${h.cacheMisses || 0}`,
+        "# HELP yagami_cache_hit_rate Cache hit rate ratio",
+        "# TYPE yagami_cache_hit_rate gauge",
+        `yagami_cache_hit_rate ${h.cacheHitRate || 0}`,
+        "# HELP yagami_documents_cached Number of cached documents",
+        "# TYPE yagami_documents_cached gauge",
+        `yagami_documents_cached ${h.documentsCached || 0}`,
+        "# HELP yagami_url_cache_entries Number of URL cache entries",
+        "# TYPE yagami_url_cache_entries gauge",
+        `yagami_url_cache_entries ${h.urlCacheEntries || 0}`,
+        "# HELP yagami_deep_research_tasks Active deep research tasks",
+        "# TYPE yagami_deep_research_tasks gauge",
+        `yagami_deep_research_tasks ${h.deepResearchTasks || 0}`,
+        "# HELP yagami_operation_slots_active Active operation slots",
+        "# TYPE yagami_operation_slots_active gauge",
+        `yagami_operation_slots_active ${h.operationSlotsActive || 0}`,
+        "# HELP yagami_operation_slots_pending Pending operation slots",
+        "# TYPE yagami_operation_slots_pending gauge",
+        `yagami_operation_slots_pending ${h.operationSlotsPending || 0}`,
+        "# HELP yagami_browse_slots_active Active browse slots",
+        "# TYPE yagami_browse_slots_active gauge",
+        `yagami_browse_slots_active ${h.browseSlotsActive || 0}`,
+        "# HELP yagami_browse_slots_pending Pending browse slots",
+        "# TYPE yagami_browse_slots_pending gauge",
+        `yagami_browse_slots_pending ${h.browseSlotsPending || 0}`,
+        "# HELP yagami_tokens_total Total tokens used",
+        "# TYPE yagami_tokens_total counter",
+        `yagami_tokens_total ${tokens.total || 0}`,
+        "# HELP yagami_tokens_input Input tokens used",
+        "# TYPE yagami_tokens_input counter",
+        `yagami_tokens_input ${tokens.input || 0}`,
+        "# HELP yagami_tokens_output Output tokens used",
+        "# TYPE yagami_tokens_output counter",
+        `yagami_tokens_output ${tokens.output || 0}`,
+        "# HELP yagami_uptime_seconds Daemon uptime in seconds",
+        "# TYPE yagami_uptime_seconds gauge",
+        `yagami_uptime_seconds ${h.uptimeSec || 0}`,
+        "",
+      ];
+      const body = lines.join("\n");
+      res.writeHead(200, {
+        "content-type": "text/plain; version=0.0.4; charset=utf-8",
+        "content-length": Buffer.byteLength(body),
+      });
+      res.end(body);
+      return;
     }
 
     if (req.method === "POST" && req.url === "/stats") {
