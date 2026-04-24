@@ -51,7 +51,7 @@
     "@mariozechner/pi-agent-core": "^0.66.0",
     "@mariozechner/pi-ai": "^0.66.0",
     "markdansi": "^0.2.1",
-    "defuddle": "^0.16.0",
+    "defuddle": "^0.18.0",
     "linkedom": "^0.18.12",
     "playwright-core": "^1.58.2"
   },
