@@ -328,6 +328,10 @@ export class YagamiEngine {
     costCacheRead: number;
     costCacheWrite: number;
     costTotal: number;
+    queriesByType: Record<string, number>;
+    errorsByType: Record<string, number>;
+    durationSumByType: Record<string, number>;
+    durationCountByType: Record<string, number>;
   };
 
   constructor(config: RuntimeConfig & object, logger: Console = console) {
@@ -366,6 +370,10 @@ export class YagamiEngine {
       costCacheRead: 0,
       costCacheWrite: 0,
       costTotal: 0,
+      queriesByType: {},
+      errorsByType: {},
+      durationSumByType: {},
+      durationCountByType: {},
     };
   }
 
@@ -1232,54 +1240,64 @@ export class YagamiEngine {
 
   async fetchContent(url: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const startedAt = Date.now();
+    const queryType = "fetch";
+    this.recordOperationStart(queryType, { countAsQuery: false });
+    let failed = false;
 
-    const maxCharacters = clampInteger(options.maxCharacters, 3000, {
-      min: 500,
-      max: 200000,
-    });
-    const noCache = toBool(options.noCache, false);
-    const requestedUrl = normalizeUrl(url);
+    try {
+      const maxCharacters = clampInteger(options.maxCharacters, 3000, {
+        min: 500,
+        max: 200000,
+      });
+      const noCache = toBool(options.noCache, false);
+      const requestedUrl = normalizeUrl(url);
 
-    const githubResult = await this.tryFetchGitHubRepoContent(requestedUrl, maxCharacters);
-    if (githubResult) {
-      return githubResult;
+      const githubResult = await this.tryFetchGitHubRepoContent(requestedUrl, maxCharacters);
+      if (githubResult) {
+        return githubResult;
+      }
+
+      const browseResult = await this.browse(requestedUrl, { bypassCache: noCache });
+      const documentId = String(browseResult.documentId || "");
+      if (!documentId) {
+        throw new Error("browse() returned no documentId");
+      }
+
+      const presentResult = await this.present(documentId, maxCharacters);
+
+      const browseTiming = (browseResult.timing as Record<string, unknown> | undefined) || {};
+      const presentTiming = (presentResult.timing as Record<string, unknown> | undefined) || {};
+
+      const browseCache = String(browseTiming.cache || (browseResult.fromCache ? "hit" : "miss"));
+      const presentCache = String(presentTiming.cache || "miss");
+
+      return {
+        url: String(presentResult.url || ""),
+        requestedUrl,
+        title: String(presentResult.title || ""),
+        author: String(presentResult.author || "Unknown"),
+        published: String(presentResult.published || "Unknown"),
+        wordCount: Number(presentResult.wordCount || 0),
+        content: String(presentResult.content || ""),
+        truncated: Boolean(presentResult.truncated),
+        documentId,
+        status: Number(browseResult.status || 0),
+        cache: {
+          browse: browseCache,
+          present: presentCache,
+        },
+        timing: {
+          totalMs: Date.now() - startedAt,
+          browseMs: (browseTiming.totalMs as number | null) || null,
+          presentMs: (presentTiming.totalMs as number | null) || null,
+        },
+      };
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      this.recordOperationEnd(queryType, startedAt, failed, { countAsQuery: false });
     }
-
-    const browseResult = await this.browse(requestedUrl, { bypassCache: noCache });
-    const documentId = String(browseResult.documentId || "");
-    if (!documentId) {
-      throw new Error("browse() returned no documentId");
-    }
-
-    const presentResult = await this.present(documentId, maxCharacters);
-
-    const browseTiming = (browseResult.timing as Record<string, unknown> | undefined) || {};
-    const presentTiming = (presentResult.timing as Record<string, unknown> | undefined) || {};
-
-    const browseCache = String(browseTiming.cache || (browseResult.fromCache ? "hit" : "miss"));
-    const presentCache = String(presentTiming.cache || "miss");
-
-    return {
-      url: String(presentResult.url || ""),
-      requestedUrl,
-      title: String(presentResult.title || ""),
-      author: String(presentResult.author || "Unknown"),
-      published: String(presentResult.published || "Unknown"),
-      wordCount: Number(presentResult.wordCount || 0),
-      content: String(presentResult.content || ""),
-      truncated: Boolean(presentResult.truncated),
-      documentId,
-      status: Number(browseResult.status || 0),
-      cache: {
-        browse: browseCache,
-        present: presentCache,
-      },
-      timing: {
-        totalMs: Date.now() - startedAt,
-        browseMs: (browseTiming.totalMs as number | null) || null,
-        presentMs: (presentTiming.totalMs as number | null) || null,
-      },
-    };
   }
 
   async webSearch(query: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
@@ -1707,6 +1725,10 @@ export class YagamiEngine {
       cacheHits: this.metrics.cacheHits,
       cacheMisses: this.metrics.cacheMisses,
       cacheHitRate,
+      queriesByType: { ...this.metrics.queriesByType },
+      errorsByType: { ...this.metrics.errorsByType },
+      durationSumByType: { ...this.metrics.durationSumByType },
+      durationCountByType: { ...this.metrics.durationCountByType },
       tokens: this.getTokenUsageSummary(),
       uptimeSec: Math.floor((Date.now() - this.metrics.startedAt) / 1000),
     };
@@ -1948,6 +1970,39 @@ export class YagamiEngine {
     return await this.enqueueOperation(() => this.runQuery(query, options), abortSignal);
   }
 
+  private deriveQueryType(options: Record<string, unknown>): string {
+    const policy = options.researchPolicy as Record<string, unknown> | undefined;
+    const mode = policy ? String(policy.mode || "").toLowerCase() : "";
+    if (mode === "deep") return "deep_research";
+    if (mode === "code" || mode === "company" || mode === "similar") return mode;
+    return "search";
+  }
+
+  private recordOperationStart(opType: string, options: { countAsQuery?: boolean } = {}): void {
+    if (options.countAsQuery !== false) {
+      this.metrics.queries += 1;
+      this.metrics.activeQueries += 1;
+    }
+    this.metrics.queriesByType[opType] = (this.metrics.queriesByType[opType] || 0) + 1;
+  }
+
+  private recordOperationEnd(
+    opType: string,
+    startedAt: number,
+    failed: boolean,
+    options: { countAsQuery?: boolean } = {},
+  ): void {
+    const durationMs = Date.now() - startedAt;
+    this.metrics.durationSumByType[opType] = (this.metrics.durationSumByType[opType] || 0) + durationMs;
+    this.metrics.durationCountByType[opType] = (this.metrics.durationCountByType[opType] || 0) + 1;
+    if (failed) {
+      this.metrics.errorsByType[opType] = (this.metrics.errorsByType[opType] || 0) + 1;
+    }
+    if (options.countAsQuery !== false) {
+      this.metrics.activeQueries = Math.max(0, this.metrics.activeQueries - 1);
+    }
+  }
+
   async runQuery(query: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const externalAbortSignal = asAbortSignal(options.abortSignal);
     throwIfAborted(externalAbortSignal, "request aborted by client");
@@ -1957,10 +2012,11 @@ export class YagamiEngine {
       throw new Error("model failed to initialize");
     }
 
-    this.metrics.queries += 1;
-    this.metrics.activeQueries += 1;
+    const queryType = this.deriveQueryType(options);
+    this.recordOperationStart(queryType);
 
     const startedAt = Date.now();
+    let failed = false;
 
     try {
       const toolsUsed: Array<Record<string, unknown>> = [];
@@ -2444,8 +2500,11 @@ export class YagamiEngine {
       });
 
       return result;
+    } catch (error) {
+      failed = true;
+      throw error;
     } finally {
-      this.metrics.activeQueries = Math.max(0, this.metrics.activeQueries - 1);
+      this.recordOperationEnd(queryType, startedAt, failed);
     }
   }
 

@@ -674,14 +674,65 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/metrics") {
       const h = engine.getHealth() as Record<string, unknown>;
       const tokens = (h.tokens || {}) as Record<string, unknown>;
-      const tokenCost = (tokens.cost || {}) as Record<string, unknown>;
-      const lines = [
-        "# HELP yagami_queries_total Total number of queries processed",
+      const queriesByType = (h.queriesByType || {}) as Record<string, number>;
+      const errorsByType = (h.errorsByType || {}) as Record<string, number>;
+      const durationSumByType = (h.durationSumByType || {}) as Record<string, number>;
+      const durationCountByType = (h.durationCountByType || {}) as Record<string, number>;
+
+      const escapeLabel = (v: string): string =>
+        v.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, '\\"');
+
+      const allTypes = new Set<string>([
+        ...Object.keys(queriesByType),
+        ...Object.keys(errorsByType),
+        ...Object.keys(durationCountByType),
+      ]);
+      const sortedTypes = [...allTypes].sort();
+
+      const lines: string[] = [
+        "# HELP yagami_queries_total Total number of queries processed (runQuery only; excludes fetch)",
         "# TYPE yagami_queries_total counter",
         `yagami_queries_total ${h.queries || 0}`,
         "# HELP yagami_queries_active Currently active queries",
         "# TYPE yagami_queries_active gauge",
         `yagami_queries_active ${h.activeQueries || 0}`,
+
+        "# HELP yagami_operations_by_type_total Operations grouped by type (search|code|company|similar|deep_research|fetch)",
+        "# TYPE yagami_operations_by_type_total counter",
+      ];
+      for (const t of sortedTypes) {
+        const v = queriesByType[t] || 0;
+        lines.push(`yagami_operations_by_type_total{type="${escapeLabel(t)}"} ${v}`);
+      }
+
+      lines.push(
+        "# HELP yagami_operations_errors_by_type_total Operation errors grouped by type",
+        "# TYPE yagami_operations_errors_by_type_total counter",
+      );
+      for (const t of sortedTypes) {
+        const v = errorsByType[t] || 0;
+        lines.push(`yagami_operations_errors_by_type_total{type="${escapeLabel(t)}"} ${v}`);
+      }
+
+      lines.push(
+        "# HELP yagami_operation_duration_seconds_sum Sum of operation durations grouped by type",
+        "# TYPE yagami_operation_duration_seconds_sum counter",
+      );
+      for (const t of sortedTypes) {
+        const v = (durationSumByType[t] || 0) / 1000;
+        lines.push(`yagami_operation_duration_seconds_sum{type="${escapeLabel(t)}"} ${v}`);
+      }
+
+      lines.push(
+        "# HELP yagami_operation_duration_seconds_count Count of completed operations grouped by type",
+        "# TYPE yagami_operation_duration_seconds_count counter",
+      );
+      for (const t of sortedTypes) {
+        const v = durationCountByType[t] || 0;
+        lines.push(`yagami_operation_duration_seconds_count{type="${escapeLabel(t)}"} ${v}`);
+      }
+
+      lines.push(
         "# HELP yagami_cache_hits_total Total cache hits",
         "# TYPE yagami_cache_hits_total counter",
         `yagami_cache_hits_total ${h.cacheHits || 0}`,
@@ -725,7 +776,7 @@ const server = http.createServer(async (req, res) => {
         "# TYPE yagami_uptime_seconds gauge",
         `yagami_uptime_seconds ${h.uptimeSec || 0}`,
         "",
-      ];
+      );
       const body = lines.join("\n");
       res.writeHead(200, {
         "content-type": "text/plain; version=0.0.4; charset=utf-8",
