@@ -48,7 +48,7 @@
   },
   "dependencies": {
     "@lightpanda/browser": "^1.2.0",
-    "@mariozechner/pi-agent-core": "^0.66.0",
+    "@mariozechner/pi-agent-core": "^0.70.0",
     "@mariozechner/pi-ai": "^0.66.0",
     "markdansi": "^0.2.1",
     "defuddle": "^0.18.0",
