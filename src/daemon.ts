@@ -679,8 +679,7 @@ const server = http.createServer(async (req, res) => {
       const durationSumByType = (h.durationSumByType || {}) as Record<string, number>;
       const durationCountByType = (h.durationCountByType || {}) as Record<string, number>;
 
-      const escapeLabel = (v: string): string =>
-        v.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, '\\"');
+      const escapeLabel = (v: string): string => v.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/"/g, '\\"');
 
       const allTypes = new Set<string>([
         ...Object.keys(queriesByType),
