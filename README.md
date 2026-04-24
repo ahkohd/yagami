@@ -60,6 +60,7 @@ The CLI talks to a local HTTP daemon (default: `http://127.0.0.1:43111`).
 
 Core endpoints:
 - `GET /health`
+- `GET /metrics`
 - `POST /stats`
 - `POST /reload`
 - `POST /stop`
@@ -79,6 +80,38 @@ You can configure daemon bind address with config keys (`host`, `port`) or env (
 ## MCP over HTTP
 
 `POST /mcp` exposes the Yagami MCP server (tools are discoverable via `tools/list`).
+
+## Observability
+
+`GET /metrics` exposes Prometheus-format counters and gauges for the daemon, covering activity, cache, concurrency, and token usage.
+
+```bash
+curl http://127.0.0.1:43111/metrics
+```
+
+Metrics exported:
+
+- `yagami_queries_total` — `runQuery` invocations (excludes `/fetch`)
+- `yagami_queries_active` — currently running queries
+- `yagami_operations_by_type_total{type="..."}` — per-type operation count: `search | code | company | similar | deep_research | fetch`
+- `yagami_operations_errors_by_type_total{type="..."}` — per-type error count
+- `yagami_operation_duration_seconds_sum{type="..."}` and `yagami_operation_duration_seconds_count{type="..."}` — histogram-like duration (compute avg via `rate(sum) / rate(count)`)
+- `yagami_cache_hits_total`, `yagami_cache_misses_total`, `yagami_cache_hit_rate`
+- `yagami_documents_cached`, `yagami_url_cache_entries`
+- `yagami_deep_research_tasks` — active deep research tasks
+- `yagami_operation_slots_active`, `yagami_operation_slots_pending` — operation concurrency
+- `yagami_browse_slots_active`, `yagami_browse_slots_pending` — browse concurrency
+- `yagami_tokens_total`, `yagami_tokens_input`, `yagami_tokens_output`
+- `yagami_uptime_seconds`
+
+Scrape config:
+
+```yaml
+- job_name: yagami
+  metrics_path: /metrics
+  static_configs:
+    - targets: ["127.0.0.1:43111"]
+```
 
 ## Configuration
 
